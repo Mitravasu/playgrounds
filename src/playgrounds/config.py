@@ -31,4 +31,3 @@ def get_settings() -> Settings:
     """Return the process-wide validated settings."""
 
     return Settings()
-

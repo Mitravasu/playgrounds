@@ -10,9 +10,6 @@ def create_ollama_client(settings: Settings | None = None) -> Client:
     return Client(
         host=str(resolved_settings.ollama_host),
         headers={
-            "Authorization": (
-                f"Bearer {resolved_settings.ollama_api_key.get_secret_value()}"
-            )
+            "Authorization": (f"Bearer {resolved_settings.ollama_api_key.get_secret_value()}")
         },
     )
-

@@ -34,4 +34,5 @@ make browsers
 make test
 make lint
 make format
+make typecheck
 ```

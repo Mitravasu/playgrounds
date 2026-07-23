@@ -24,4 +24,3 @@ def test_create_ollama_client_uses_cloud_credentials(monkeypatch: Any) -> None:
         "host": "https://ollama.com/",
         "headers": {"Authorization": "Bearer test-api-key"},
     }
-
