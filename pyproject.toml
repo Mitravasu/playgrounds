@@ -1,0 +1,32 @@
+[project]
+name = "playgrounds"
+version = "0.1.0"
+description = "Analyze website design systems and generate matching UI components."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "docker",
+    "playwright",
+    "pydantic",
+    "pydantic-settings",
+    "typer",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[build-system]
+requires = ["uv-build>=0.10.7,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
