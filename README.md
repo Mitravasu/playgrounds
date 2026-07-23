@@ -11,6 +11,15 @@ Install the project and development dependencies:
 make setup
 ```
 
+Configure Ollama Cloud:
+
+```bash
+cp .env.example .env
+```
+
+Replace the placeholder `OLLAMA_API_KEY` in `.env`. The defaults use
+`https://ollama.com` and `gemma4:cloud`.
+
 Run all checks:
 
 ```bash
