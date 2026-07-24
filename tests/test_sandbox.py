@@ -8,6 +8,8 @@ import pytest
 from pydantic import ValidationError
 
 from playgrounds.sandbox import (
+    AnalyzerJobRequest,
+    PublicAnalyzerJobRequest,
     SandboxArtifact,
     SandboxJobKind,
     SandboxJobRequest,
@@ -21,6 +23,69 @@ def test_creator_profile_is_fixed_and_offline() -> None:
 
     assert profile.network_mode == "none"
     assert profile.entrypoint == ("python", "-m", "playgrounds_sandbox.creator")
+
+
+def test_analyzer_profile_is_fixed_and_offline() -> None:
+    profile = runtime_profile_for(SandboxJobKind.ANALYZER)
+
+    assert profile.network_mode == "none"
+    assert profile.entrypoint == ("python", "-m", "playgrounds_sandbox.analyzer")
+
+
+def test_analyzer_request_accepts_only_its_fixed_fixture_and_artifacts() -> None:
+    request = AnalyzerJobRequest(
+        inputs=(SandboxArtifact(path="page.html", media_type="text/html"),),
+        outputs=(
+            SandboxArtifact(path="screenshot.png", media_type="image/png"),
+            SandboxArtifact(path="page.json", media_type="application/json"),
+            SandboxArtifact(path="observations.json", media_type="application/json"),
+        ),
+    )
+
+    assert request.kind is SandboxJobKind.ANALYZER
+
+
+def test_analyzer_request_rejects_an_undeclared_artifact() -> None:
+    with pytest.raises(ValidationError, match="declared evidence artifacts"):
+        AnalyzerJobRequest(
+            inputs=(SandboxArtifact(path="page.html", media_type="text/html"),),
+            outputs=(SandboxArtifact(path="screenshot.png", media_type="image/png"),),
+        )
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        "http://www.mitravasu.com/",
+        "https://127.0.0.1/",
+        "https://localhost/",
+        "https://www.mitravasu.com:444/",
+        "https://other.example/",
+    ),
+)
+def test_public_analyzer_request_rejects_unsafe_or_untrusted_urls(url: str) -> None:
+    with pytest.raises(ValidationError):
+        PublicAnalyzerJobRequest(
+            url=url,
+            outputs=(
+                SandboxArtifact(path="screenshot.png", media_type="image/png"),
+                SandboxArtifact(path="page.json", media_type="application/json"),
+                SandboxArtifact(path="observations.json", media_type="application/json"),
+            ),
+        )
+
+
+def test_public_analyzer_request_uses_the_internal_proxy_network() -> None:
+    request = PublicAnalyzerJobRequest(
+        url="https://www.mitravasu.com/",
+        outputs=(
+            SandboxArtifact(path="screenshot.png", media_type="image/png"),
+            SandboxArtifact(path="page.json", media_type="application/json"),
+            SandboxArtifact(path="observations.json", media_type="application/json"),
+        ),
+    )
+
+    assert request.url == "https://www.mitravasu.com/"
 
 
 @pytest.mark.parametrize("path", ("/etc/passwd", "../secret", "output/../../secret", "."))

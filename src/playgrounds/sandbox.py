@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import ipaddress
 import json
 import tarfile
 import time
@@ -9,10 +10,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from docker.errors import DockerException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from requests.exceptions import RequestException
 
 
@@ -54,6 +56,87 @@ class SandboxJobRequest(BaseModel):
     outputs: tuple[SandboxArtifact, ...] = Field(min_length=1)
 
 
+class AnalyzerJobRequest(SandboxJobRequest):
+    """Offline analyzer request with one local page and fixed evidence artifacts."""
+
+    kind: Literal[SandboxJobKind.ANALYZER] = SandboxJobKind.ANALYZER
+
+    @model_validator(mode="after")
+    def validate_analyzer_contract(self) -> "AnalyzerJobRequest":
+        """Keep the offline analyzer's input and output surface fixed."""
+
+        expected_inputs = {"page.html": "text/html"}
+        expected_outputs = {
+            "screenshot.png": "image/png",
+            "page.json": "application/json",
+            "observations.json": "application/json",
+        }
+        actual_inputs = {artifact.path: artifact.media_type for artifact in self.inputs}
+        actual_outputs = {artifact.path: artifact.media_type for artifact in self.outputs}
+        if len(self.inputs) != 1 or actual_inputs != expected_inputs:
+            raise ValueError("analyzer jobs require exactly one text/html input: page.html")
+        if len(self.outputs) != len(expected_outputs) or actual_outputs != expected_outputs:
+            raise ValueError("analyzer jobs require the declared evidence artifacts")
+        return self
+
+
+TRUSTED_ANALYZER_HOSTS = frozenset({"www.mitravasu.com"})
+
+
+def validate_trusted_analyzer_url(value: str) -> str:
+    """Accept one allowlisted public HTTPS origin for the public-access POC."""
+
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in {None, 443}
+    ):
+        raise ValueError("analyzer URLs must be credential-free HTTPS URLs on port 443")
+    hostname = parsed.hostname.lower().rstrip(".")
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("analyzer URLs must not use literal IP addresses")
+    if hostname not in TRUSTED_ANALYZER_HOSTS:
+        raise ValueError("analyzer URL host is not in the trusted POC allowlist")
+    return value
+
+
+class PublicAnalyzerJobRequest(SandboxJobRequest):
+    """Controlled public analyzer request, limited to a trusted HTTPS origin."""
+
+    kind: Literal[SandboxJobKind.ANALYZER] = SandboxJobKind.ANALYZER
+    url: str = Field(min_length=1)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        """Reject unsafe or unapproved targets before a container is started."""
+
+        return validate_trusted_analyzer_url(value)
+
+    @model_validator(mode="after")
+    def validate_public_analyzer_contract(self) -> "PublicAnalyzerJobRequest":
+        """Keep public analysis artifact and input surfaces fixed."""
+
+        expected_outputs = {
+            "screenshot.png": "image/png",
+            "page.json": "application/json",
+            "observations.json": "application/json",
+        }
+        actual_outputs = {artifact.path: artifact.media_type for artifact in self.outputs}
+        if self.inputs:
+            raise ValueError("public analyzer jobs do not accept workspace inputs")
+        if len(self.outputs) != len(expected_outputs) or actual_outputs != expected_outputs:
+            raise ValueError("analyzer jobs require the declared evidence artifacts")
+        return self
+
+
 class SandboxRuntimeProfile(BaseModel):
     """Trusted runtime settings selected solely from a job kind."""
 
@@ -78,13 +161,24 @@ SANDBOX_RUNTIME_PROFILES: dict[SandboxJobKind, SandboxRuntimeProfile] = {
     ),
     SandboxJobKind.ANALYZER: SandboxRuntimeProfile(
         entrypoint=("python", "-m", "playgrounds_sandbox.analyzer"),
-        network_mode="playgrounds-analyzer-egress",
+        network_mode="none",
         timeout_seconds=30,
         memory_limit="1g",
         cpu_count=1,
         pid_limit=64,
     ),
 }
+
+PUBLIC_ANALYZER_RUNTIME_PROFILE = SandboxRuntimeProfile(
+    entrypoint=("python", "-m", "playgrounds_sandbox.analyzer"),
+    network_mode="playgrounds-analyzer-egress",
+    timeout_seconds=90,
+    memory_limit="1g",
+    cpu_count=1,
+    pid_limit=64,
+)
+ANALYZER_PROXY_HOST = "playgrounds-egress-proxy"
+ANALYZER_PROXY_IP = "172.30.0.2"
 
 
 def runtime_profile_for(kind: SandboxJobKind) -> SandboxRuntimeProfile:
@@ -126,7 +220,11 @@ class SandboxRunner:
         """Run a job, validating its declared artifacts and always cleaning up."""
 
         self._validate_inputs(request, input_files)
-        profile = runtime_profile_for(request.kind)
+        profile = (
+            PUBLIC_ANALYZER_RUNTIME_PROFILE
+            if isinstance(request, PublicAnalyzerJobRequest)
+            else runtime_profile_for(request.kind)
+        )
         container: Any | None = None
         staging_container: Any | None = None
         input_volume: Any | None = None
@@ -148,6 +246,11 @@ class SandboxRunner:
             self._prepare_workspace_permissions(staging_container)
             staging_container.remove(force=True)
             staging_container = None
+            container_options: dict[str, Any] = {}
+            if isinstance(request, PublicAnalyzerJobRequest):
+                # gVisor's network stack does not resolve Docker service aliases
+                # on this host. This maps only the internal proxy endpoint.
+                container_options["extra_hosts"] = {ANALYZER_PROXY_HOST: ANALYZER_PROXY_IP}
             container = self._client.containers.create(
                 self._image,
                 command=["python", "-m", "playgrounds_sandbox.supervisor"],
@@ -155,7 +258,7 @@ class SandboxRunner:
                 user="sandbox",
                 runtime=self._runtime_name,
                 network_mode=profile.network_mode,
-                environment={"PLAYGROUNDS_JOB_ENTRYPOINT": " ".join(profile.entrypoint)},
+                environment=self._job_environment(request, profile),
                 read_only=True,
                 tmpfs={
                     "/tmp": "rw,noexec,nosuid,size=64m,uid=10001,gid=10001",
@@ -169,6 +272,7 @@ class SandboxRunner:
                 mem_limit=profile.memory_limit,
                 nano_cpus=profile.cpu_count * 1_000_000_000,
                 pids_limit=profile.pid_limit,
+                **container_options,
             )
             container.start()
             exit_code = self._wait_for_job_result(container, profile.timeout_seconds)
@@ -212,6 +316,16 @@ class SandboxRunner:
                 staging_container.remove(force=True)
             if input_volume is not None:
                 input_volume.remove(force=True)
+
+    @staticmethod
+    def _job_environment(
+        request: SandboxJobRequest, profile: SandboxRuntimeProfile
+    ) -> dict[str, str]:
+        environment = {"PLAYGROUNDS_JOB_ENTRYPOINT": " ".join(profile.entrypoint)}
+        if isinstance(request, PublicAnalyzerJobRequest):
+            environment["PLAYGROUNDS_ANALYZER_URL"] = request.url
+            environment["PLAYGROUNDS_ANALYZER_PROXY"] = f"http://{ANALYZER_PROXY_HOST}:8080"
+        return environment
 
     def _create_workspace_volume(self) -> Any:
         return self._client.volumes.create(labels={"playgrounds.sandbox": "true"})
