@@ -1,0 +1,342 @@
+"""Typed contracts for disposable, fixed-purpose sandbox jobs."""
+
+import hashlib
+import io
+import json
+import tarfile
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import StrEnum
+from pathlib import PurePosixPath
+from typing import Any
+
+from docker.errors import DockerException
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from requests.exceptions import RequestException
+
+
+class SandboxJobKind(StrEnum):
+    """The only job types the trusted orchestrator may start."""
+
+    ANALYZER = "analyzer"
+    CREATOR = "creator"
+
+
+class SandboxArtifact(BaseModel):
+    """A file that may cross the trusted application/sandbox boundary."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: str = Field(min_length=1)
+    media_type: str = Field(min_length=1)
+    max_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
+
+    @field_validator("path")
+    @classmethod
+    def validate_relative_posix_path(cls, value: str) -> str:
+        """Allow only a non-traversing, relative POSIX path."""
+
+        path = PurePosixPath(value)
+        if path.is_absolute() or ".." in path.parts or value in {".", ""}:
+            message = "artifact paths must be relative and must not contain '..'"
+            raise ValueError(message)
+        return path.as_posix()
+
+
+class SandboxJobRequest(BaseModel):
+    """A fixed-purpose job request without arbitrary runtime controls."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: SandboxJobKind
+    inputs: tuple[SandboxArtifact, ...] = ()
+    outputs: tuple[SandboxArtifact, ...] = Field(min_length=1)
+
+
+class SandboxRuntimeProfile(BaseModel):
+    """Trusted runtime settings selected solely from a job kind."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    entrypoint: tuple[str, ...]
+    network_mode: str
+    timeout_seconds: int = Field(gt=0)
+    memory_limit: str
+    cpu_count: int = Field(gt=0)
+    pid_limit: int = Field(gt=0)
+
+
+SANDBOX_RUNTIME_PROFILES: dict[SandboxJobKind, SandboxRuntimeProfile] = {
+    SandboxJobKind.CREATOR: SandboxRuntimeProfile(
+        entrypoint=("python", "-m", "playgrounds_sandbox.creator"),
+        network_mode="none",
+        timeout_seconds=30,
+        memory_limit="1g",
+        cpu_count=1,
+        pid_limit=64,
+    ),
+    SandboxJobKind.ANALYZER: SandboxRuntimeProfile(
+        entrypoint=("python", "-m", "playgrounds_sandbox.analyzer"),
+        network_mode="playgrounds-analyzer-egress",
+        timeout_seconds=30,
+        memory_limit="1g",
+        cpu_count=1,
+        pid_limit=64,
+    ),
+}
+
+
+def runtime_profile_for(kind: SandboxJobKind) -> SandboxRuntimeProfile:
+    """Return the application-owned runtime profile for a fixed job kind."""
+
+    return SANDBOX_RUNTIME_PROFILES[kind]
+
+
+@dataclass(frozen=True)
+class SandboxJobResult:
+    """The bounded result returned after a sandbox container is removed."""
+
+    succeeded: bool
+    exit_code: int | None
+    outputs: dict[str, bytes]
+    logs: str
+    error: str | None = None
+
+
+class SandboxRunner:
+    """Run fixed-purpose jobs with application-owned Docker restrictions."""
+
+    _runtime_name = "playgrounds-runsc"
+    _input_directory = "/work/input"
+    _output_directory = "/work/output"
+    _status_path = "/tmp/playgrounds-job-status.json"
+    _max_log_bytes = 64 * 1024
+    _max_output_bytes = 100 * 1024 * 1024
+
+    def __init__(self, client: Any, *, image: str) -> None:
+        self._client = client
+        self._image = image
+
+    def run(
+        self,
+        request: SandboxJobRequest,
+        input_files: Mapping[str, bytes],
+    ) -> SandboxJobResult:
+        """Run a job, validating its declared artifacts and always cleaning up."""
+
+        self._validate_inputs(request, input_files)
+        profile = runtime_profile_for(request.kind)
+        container: Any | None = None
+        staging_container: Any | None = None
+        input_volume: Any | None = None
+        try:
+            input_volume = self._create_workspace_volume()
+            staging_container = self._client.containers.create(
+                self._image,
+                command=["sleep", "30"],
+                detach=True,
+                user="root",
+                runtime=self._runtime_name,
+                network_mode="none",
+                volumes={
+                    input_volume.name: {"bind": self._input_directory, "mode": "rw"},
+                },
+            )
+            staging_container.start()
+            staging_container.put_archive(self._input_directory, self._make_archive(input_files))
+            self._prepare_workspace_permissions(staging_container)
+            staging_container.remove(force=True)
+            staging_container = None
+            container = self._client.containers.create(
+                self._image,
+                command=["python", "-m", "playgrounds_sandbox.supervisor"],
+                detach=True,
+                user="sandbox",
+                runtime=self._runtime_name,
+                network_mode=profile.network_mode,
+                environment={"PLAYGROUNDS_JOB_ENTRYPOINT": " ".join(profile.entrypoint)},
+                read_only=True,
+                tmpfs={
+                    "/tmp": "rw,noexec,nosuid,size=64m,uid=10001,gid=10001",
+                    "/work/output": "rw,noexec,nosuid,size=100m,uid=10001,gid=10001",
+                },
+                volumes={
+                    input_volume.name: {"bind": self._input_directory, "mode": "ro"},
+                },
+                cap_drop=["ALL"],
+                security_opt=["no-new-privileges:true"],
+                mem_limit=profile.memory_limit,
+                nano_cpus=profile.cpu_count * 1_000_000_000,
+                pids_limit=profile.pid_limit,
+            )
+            container.start()
+            exit_code = self._wait_for_job_result(container, profile.timeout_seconds)
+            logs = self._limited_logs(container)
+            if exit_code != 0:
+                return SandboxJobResult(
+                    succeeded=False,
+                    exit_code=exit_code,
+                    outputs={},
+                    logs=logs,
+                    error="sandbox job exited unsuccessfully",
+                )
+            return SandboxJobResult(
+                succeeded=True,
+                exit_code=exit_code,
+                outputs=self._collect_outputs(
+                    self._collect_output_archive(container), request.outputs
+                ),
+                logs=logs,
+            )
+        except (
+            DockerException,
+            RequestException,
+            RuntimeError,
+            TimeoutError,
+            TypeError,
+            ValueError,
+            tarfile.TarError,
+        ) as error:
+            return SandboxJobResult(
+                succeeded=False,
+                exit_code=None,
+                outputs={},
+                logs=self._limited_logs(container) if container is not None else "",
+                error=str(error),
+            )
+        finally:
+            if container is not None:
+                container.remove(force=True)
+            if staging_container is not None:
+                staging_container.remove(force=True)
+            if input_volume is not None:
+                input_volume.remove(force=True)
+
+    def _create_workspace_volume(self) -> Any:
+        return self._client.volumes.create(labels={"playgrounds.sandbox": "true"})
+
+    def _prepare_workspace_permissions(self, container: Any) -> None:
+        result = container.exec_run(
+            [
+                "sh",
+                "-c",
+                f"chmod -R a+rX {self._input_directory}",
+            ]
+        )
+        exit_code = result.exit_code if hasattr(result, "exit_code") else result[0]
+        if exit_code != 0:
+            raise RuntimeError("sandbox workspace permission setup failed")
+
+    def _wait_for_job_result(self, container: Any, timeout_seconds: int) -> int:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            result = container.exec_run(["cat", self._status_path], user="sandbox")
+            exit_code = result.exit_code if hasattr(result, "exit_code") else result[0]
+            output = result.output if hasattr(result, "output") else result[1]
+            if exit_code == 0:
+                status = json.loads(bytes(output))
+                if isinstance(status, dict) and isinstance(status.get("exit_code"), int):
+                    return status["exit_code"]
+                raise ValueError("sandbox supervisor returned an invalid status document")
+            time.sleep(0.05)
+        raise TimeoutError("sandbox job timed out")
+
+    def _collect_output_archive(self, container: Any) -> bytes:
+        result = container.exec_run(
+            ["tar", "--create", "--file=-", "--directory=/work/output", "."], user="sandbox"
+        )
+        exit_code = result.exit_code if hasattr(result, "exit_code") else result[0]
+        output = result.output if hasattr(result, "output") else result[1]
+        archive = bytes(output)
+        if exit_code != 0:
+            raise RuntimeError("sandbox output collection failed")
+        if len(archive) > self._max_output_bytes:
+            raise ValueError("sandbox output archive exceeds the configured size limit")
+        return archive
+
+    @staticmethod
+    def _validate_inputs(request: SandboxJobRequest, input_files: Mapping[str, bytes]) -> None:
+        declared = {artifact.path: artifact for artifact in request.inputs}
+        supplied = set(input_files)
+        if supplied != set(declared):
+            message = "input files must exactly match the declared input artifacts"
+            raise ValueError(message)
+        for path, content in input_files.items():
+            if len(content) > declared[path].max_bytes:
+                raise ValueError(f"sandbox input exceeds the declared size limit: {path}")
+
+    @staticmethod
+    def _make_archive(files: Mapping[str, bytes]) -> bytes:
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w") as tar:
+            for path, content in files.items():
+                info = tarfile.TarInfo(name=path)
+                info.size = len(content)
+                info.mode = 0o600
+                tar.addfile(info, io.BytesIO(content))
+        return archive.getvalue()
+
+    def _limited_logs(self, container: Any) -> str:
+        logs = container.logs(stdout=True, stderr=True)[-self._max_log_bytes :]
+        return logs.decode("utf-8", errors="replace")
+
+    def _collect_outputs(
+        self, archive: bytes, expected_outputs: tuple[SandboxArtifact, ...]
+    ) -> dict[str, bytes]:
+        files = self._read_output_archive(archive)
+        manifest = self._read_manifest(files.pop("manifest.json", None))
+        expected = {artifact.path: artifact.media_type for artifact in expected_outputs}
+        size_limits = {artifact.path: artifact.max_bytes for artifact in expected_outputs}
+        actual = {item["path"]: item["media_type"] for item in manifest["artifacts"]}
+        if actual != expected or set(files) != set(expected):
+            message = "sandbox output does not match the declared artifact manifest"
+            raise ValueError(message)
+        for item in manifest["artifacts"]:
+            path = item["path"]
+            content = files[path]
+            if len(content) > size_limits[path]:
+                raise ValueError(f"sandbox output exceeds the declared size limit: {path}")
+            digest = hashlib.sha256(content).hexdigest()
+            if item["sha256"] != digest:
+                message = f"sandbox output digest mismatch: {path}"
+                raise ValueError(message)
+        return files
+
+    @staticmethod
+    def _read_output_archive(archive: bytes) -> dict[str, bytes]:
+        files: dict[str, bytes] = {}
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
+            for member in tar.getmembers():
+                if not member.isfile():
+                    continue
+                path = PurePosixPath(member.name)
+                parts = path.parts[1:] if path.parts and path.parts[0] == "output" else path.parts
+                relative_path = PurePosixPath(*parts).as_posix()
+                SandboxArtifact(path=relative_path, media_type="application/octet-stream")
+                file_object = tar.extractfile(member)
+                if file_object is None:
+                    raise ValueError(f"unable to read sandbox output: {relative_path}")
+                files[relative_path] = file_object.read()
+        return files
+
+    @staticmethod
+    def _read_manifest(raw_manifest: bytes | None) -> dict[str, Any]:
+        if raw_manifest is None:
+            raise ValueError("sandbox output manifest is missing")
+        try:
+            manifest = json.loads(raw_manifest)
+        except json.JSONDecodeError as error:
+            raise ValueError("sandbox output manifest is invalid JSON") from error
+        artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else None
+        if not isinstance(artifacts, list):
+            raise TypeError("sandbox output manifest has no artifact list")
+        for item in artifacts:
+            if not (
+                isinstance(item, dict)
+                and isinstance(item.get("path"), str)
+                and isinstance(item.get("media_type"), str)
+                and isinstance(item.get("sha256"), str)
+            ):
+                raise TypeError("sandbox output manifest contains an invalid artifact")
+        return {"artifacts": artifacts}
