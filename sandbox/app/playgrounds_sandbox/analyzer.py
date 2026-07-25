@@ -20,18 +20,46 @@ PAGE_FILE = "page.html"
 STYLE_ALLOWLIST_VERSION = "1"
 STYLE_ALLOWLIST = (
     "backgroundColor",
+    "borderBottomColor",
     "borderBottomLeftRadius",
     "borderBottomRightRadius",
+    "borderBottomStyle",
+    "borderBottomWidth",
+    "borderLeftColor",
+    "borderLeftStyle",
+    "borderLeftWidth",
+    "borderRightColor",
+    "borderRightStyle",
+    "borderRightWidth",
+    "borderTopColor",
     "borderTopLeftRadius",
     "borderTopRightRadius",
+    "borderTopStyle",
+    "borderTopWidth",
+    "boxShadow",
     "color",
+    "cursor",
     "display",
     "fontFamily",
     "fontSize",
     "fontStyle",
     "fontWeight",
     "lineHeight",
+    "marginBottom",
+    "marginLeft",
+    "marginRight",
+    "marginTop",
+    "maxWidth",
+    "minHeight",
+    "minWidth",
     "opacity",
+    "outlineColor",
+    "outlineStyle",
+    "outlineWidth",
+    "paddingBottom",
+    "paddingLeft",
+    "paddingRight",
+    "paddingTop",
     "textAlign",
     "textDecorationLine",
 )
@@ -106,6 +134,20 @@ def _extract_observations(page: Page) -> list[dict[str, Any]]:
               header: "banner", img: "img", input: "textbox", main: "main",
               nav: "navigation", ol: "list", select: "combobox", textarea: "textbox", ul: "list"
             };
+            const buttonLikeLink = (tag, styles, bounds) => {
+              if (tag !== "a") return null;
+              const hasBackground = styles.backgroundColor !== "transparent" &&
+                styles.backgroundColor !== "rgba(0, 0, 0, 0)";
+              const hasBorder = ["borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth"]
+                .some((name) => Number.parseFloat(styles[name]) > 0);
+              const hasShadow = styles.boxShadow !== "none";
+              const padding = ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"]
+                .reduce((total, name) => total + Number.parseFloat(styles[name]), 0);
+              const hasActionTarget = bounds.height >= 32 && padding >= 8;
+              return hasBackground || hasBorder || hasShadow || hasActionTarget
+                ? "button_like_link"
+                : null;
+            };
             return [...document.querySelectorAll("*")].flatMap((element, index) => {
               const styles = getComputedStyle(element);
               const bounds = element.getBoundingClientRect();
@@ -122,6 +164,7 @@ def _extract_observations(page: Page) -> list[dict[str, Any]]:
                 id: `element-${index}`,
                 tag,
                 role: element.getAttribute("role") || implicitRoles[tag] || null,
+                visual_role: buttonLikeLink(tag, computedStyles, bounds),
                 text,
                 bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
                 styles: computedStyles

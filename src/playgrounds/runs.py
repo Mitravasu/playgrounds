@@ -181,6 +181,24 @@ class RunStore:
         record.analysis.model = ModelRecord(name=model_name, prompt_version=prompt_version)
         return self._write_record(record)
 
+    def persist_style_guide_response(self, run_id: str, content: str, *, attempt: int) -> RunRecord:
+        """Keep an inspectable raw model response before schema validation."""
+
+        if attempt not in {1, 2}:
+            raise ValueError("style-guide response attempts must be 1 or 2")
+        record = self.load_run(run_id)
+        if record.analysis.status is not AnalysisStatus.EVIDENCE_CAPTURED:
+            raise ValueError("raw style-guide responses require captured analysis evidence")
+        filename = "style-guide.raw.txt" if attempt == 1 else "style-guide.repair.raw.txt"
+        stored = self._write_artifacts(
+            self._run_directory(run_id),
+            ANALYSIS_DIRECTORY,
+            {filename: content.encode()},
+            {filename: "text/plain"},
+        )
+        record.analysis.artifacts.extend(stored)
+        return self._write_record(record)
+
     def create_creation(self, run_id: str, prompt: str) -> CreationRecord:
         """Reserve a creation directory pinned to this run's style guide."""
 

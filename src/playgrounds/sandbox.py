@@ -83,7 +83,9 @@ class AnalyzerJobRequest(SandboxJobRequest):
 TRUSTED_ANALYZER_HOSTS = frozenset({"www.mitravasu.com"})
 
 
-def validate_trusted_analyzer_url(value: str) -> str:
+def validate_trusted_analyzer_url(
+    value: str, trusted_hosts: frozenset[str] = TRUSTED_ANALYZER_HOSTS
+) -> str:
     """Accept one allowlisted public HTTPS origin for the public-access POC."""
 
     parsed = urlsplit(value)
@@ -102,7 +104,7 @@ def validate_trusted_analyzer_url(value: str) -> str:
         pass
     else:
         raise ValueError("analyzer URLs must not use literal IP addresses")
-    if hostname not in TRUSTED_ANALYZER_HOSTS:
+    if hostname not in trusted_hosts:
         raise ValueError("analyzer URL host is not in the trusted POC allowlist")
     return value
 
@@ -112,13 +114,15 @@ class PublicAnalyzerJobRequest(SandboxJobRequest):
 
     kind: Literal[SandboxJobKind.ANALYZER] = SandboxJobKind.ANALYZER
     url: str = Field(min_length=1)
+    trusted_hosts: frozenset[str] = Field(default=TRUSTED_ANALYZER_HOSTS, exclude=True)
 
-    @field_validator("url")
+    @field_validator("trusted_hosts")
     @classmethod
-    def validate_url(cls, value: str) -> str:
-        """Reject unsafe or unapproved targets before a container is started."""
-
-        return validate_trusted_analyzer_url(value)
+    def normalize_trusted_hosts(cls, value: frozenset[str]) -> frozenset[str]:
+        hosts = frozenset(host.lower().rstrip(".") for host in value if host.strip())
+        if not hosts:
+            raise ValueError("public analyzer jobs require at least one trusted host")
+        return hosts
 
     @model_validator(mode="after")
     def validate_public_analyzer_contract(self) -> "PublicAnalyzerJobRequest":
@@ -132,6 +136,7 @@ class PublicAnalyzerJobRequest(SandboxJobRequest):
         actual_outputs = {artifact.path: artifact.media_type for artifact in self.outputs}
         if self.inputs:
             raise ValueError("public analyzer jobs do not accept workspace inputs")
+        validate_trusted_analyzer_url(self.url, self.trusted_hosts)
         if len(self.outputs) != len(expected_outputs) or actual_outputs != expected_outputs:
             raise ValueError("analyzer jobs require the declared evidence artifacts")
         return self

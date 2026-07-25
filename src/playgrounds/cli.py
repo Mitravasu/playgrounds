@@ -26,8 +26,10 @@ def analyze(url: str) -> None:
         store=RunStore(settings.runs_directory),
         sandbox_runner=SandboxRunner(docker.from_env(), image=settings.sandbox_image),
         synthesizer=OllamaStyleGuideSynthesizer(
-            create_ollama_client(settings), model_name=settings.ollama_model
+            create_ollama_client(settings), model_name=settings.ollama_model, reporter=typer.echo
         ),
+        trusted_hosts=settings.trusted_analyzer_host_set,
+        reporter=typer.echo,
     )
     run = workflow.analyze(url)
     typer.echo(f"analysis complete: {settings.runs_directory / run.run_id}")

@@ -2,10 +2,15 @@
 
 import asyncio
 import ipaddress
+import os
 import socket
 from contextlib import suppress
 
-TRUSTED_HOSTS = frozenset({"www.mitravasu.com"})
+TRUSTED_HOSTS = frozenset(
+    host.strip().lower().rstrip(".")
+    for host in os.environ.get("PLAYGROUNDS_TRUSTED_ANALYZER_HOSTS", "www.mitravasu.com").split(",")
+    if host.strip()
+)
 MAX_REQUEST_BYTES = 16 * 1024
 
 
@@ -137,6 +142,8 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 async def main() -> None:
     """Serve the fixed proxy only on its analyzer-facing internal network."""
 
+    if not TRUSTED_HOSTS:
+        raise RuntimeError("proxy requires at least one trusted analyzer host")
     server = await asyncio.start_server(handle_client, "0.0.0.0", 8080)
     async with server:
         await server.serve_forever()

@@ -88,6 +88,20 @@ def test_public_analyzer_request_uses_the_internal_proxy_network() -> None:
     assert request.url == "https://www.mitravasu.com/"
 
 
+def test_public_analyzer_request_uses_an_explicit_trusted_host_allowlist() -> None:
+    request = PublicAnalyzerJobRequest(
+        url="https://example.com/",
+        trusted_hosts=frozenset({"example.com"}),
+        outputs=(
+            SandboxArtifact(path="screenshot.png", media_type="image/png"),
+            SandboxArtifact(path="page.json", media_type="application/json"),
+            SandboxArtifact(path="observations.json", media_type="application/json"),
+        ),
+    )
+
+    assert request.trusted_hosts == frozenset({"example.com"})
+
+
 @pytest.mark.parametrize("path", ("/etc/passwd", "../secret", "output/../../secret", "."))
 def test_artifact_path_rejects_paths_outside_the_job_workspace(path: str) -> None:
     with pytest.raises(ValidationError, match="relative"):
