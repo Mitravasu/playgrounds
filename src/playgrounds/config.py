@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,15 @@ class Settings(BaseSettings):
         default="gemma4:cloud",
         min_length=1,
         validation_alias="OLLAMA_MODEL",
+    )
+    sandbox_image: str = Field(
+        default="playgrounds-browser:latest",
+        min_length=1,
+        validation_alias="PLAYGROUNDS_SANDBOX_IMAGE",
+    )
+    runs_directory: Path = Field(
+        default=Path("runs"),
+        validation_alias="PLAYGROUNDS_RUNS_DIRECTORY",
     )
 
 

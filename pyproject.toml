@@ -13,6 +13,9 @@ dependencies = [
     "typer",
 ]
 
+[project.scripts]
+playgrounds = "playgrounds.cli:app"
+
 [dependency-groups]
 dev = [
     "pytest",
