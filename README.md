@@ -56,6 +56,35 @@ diagnostics, and scores the result with a fresh reviewer context. It makes at
 most one revision. The selected files are written to
 `components/<creation-id>/` and the full attempt history remains under the run.
 
+## Offline Storybook toolchain
+
+The sandbox image also contains a preinstalled React, TypeScript, Vite, Storybook,
+accessibility-addon, and Lucide toolchain under `/opt/storybook-template`. Build it
+with:
+
+```bash
+make sandbox-image
+```
+
+The image build has two stages:
+
+1. The Node stage runs `npm ci` from the committed lockfile, type-checks the
+   template, and completes a static Storybook build as a smoke test.
+2. The final Python Playwright stage receives Node, npm, the immutable template,
+   and its complete `node_modules` tree.
+
+Dependency resolution therefore happens only while the trusted image is built.
+Creator containers continue to run with Docker networking disabled. Their npm
+configuration is forced offline, Storybook telemetry is disabled, and generated
+source can use only the dependencies already present in the template. Storybook's
+writable build cache is redirected from the immutable dependency tree to `/tmp`.
+
+The template deliberately excludes Tailwind. It uses ordinary imported CSS and
+includes `lucide-react` for local icons. Exact dependency versions live in
+`sandbox/storybook-template/package.json`; transitive versions and integrity
+hashes live in its lockfile. The Node and Playwright base-image defaults are also
+digest-pinned. Dockerfile build arguments provide the explicit upgrade path.
+
 Individual commands remain available:
 
 ```bash
