@@ -74,6 +74,17 @@ def available_loopback_port() -> int:
         return int(candidate.getsockname()[1])
 
 
+def _log_storage(path: Path) -> None:
+    """Emit bounded free-space diagnostics for browser-capture failures."""
+
+    stats = os.statvfs(path)
+    print(
+        f"storage path={path} free_bytes={stats.f_bavail * stats.f_frsize} "
+        f"total_bytes={stats.f_blocks * stats.f_frsize}",
+        flush=True,
+    )
+
+
 def _block_non_fixture_requests(route: Route, fixture_url: str) -> None:
     """Allow only the local fixture server, even before network isolation applies."""
 
@@ -187,6 +198,8 @@ def main() -> None:
     if target_url is None and not fixture.is_file():
         raise FileNotFoundError("analyzer jobs require /work/input/page.html")
     OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    _log_storage(Path("/tmp"))
+    _log_storage(OUTPUT_DIRECTORY)
     server: ThreadingHTTPServer | None = None
     fixture_url: str | None = None
     if target_url is None:
@@ -218,6 +231,8 @@ def main() -> None:
             print("analyzer navigation committed", flush=True)
             page.wait_for_timeout(1_000)
             print("analyzer capturing screenshot", flush=True)
+            _log_storage(Path("/tmp"))
+            _log_storage(OUTPUT_DIRECTORY)
             page.screenshot(path=OUTPUT_DIRECTORY / "screenshot.png", full_page=True)
             observations = _extract_observations(page)
             print(f"analyzer extracted {len(observations)} observations", flush=True)

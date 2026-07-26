@@ -2,11 +2,11 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, JsonValue
 
 
-class ComponentFamily(BaseModel):
-    """One reusable component pattern inferred from rendered evidence."""
+class ComponentPattern(BaseModel):
+    """One reusable UI structure observed across the rendered page."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -19,41 +19,28 @@ class ComponentFamily(BaseModel):
 
 
 class InteractionState(BaseModel):
-    """An observed or inferred state for a component family."""
+    """One named interaction state belonging to a component pattern."""
 
     model_config = ConfigDict(extra="forbid")
 
-    component: str | None = Field(default=None, min_length=1)
-    state: str | None = Field(default=None, min_length=1)
-    name: str | None = Field(default=None, min_length=1)
-    description: str | None = Field(default=None, min_length=1)
+    component_pattern: str = Field(min_length=1)
+    state: str = Field(min_length=1)
+    description: str = Field(min_length=1)
     styles: dict[str, JsonValue] = Field(default_factory=dict)
     evidence_refs: list[str] = Field(min_length=1)
     inferred: bool = False
 
-    @model_validator(mode="after")
-    def validate_identity(self) -> "InteractionState":
-        if (self.component and self.state) or (self.name and self.description):
-            return self
-        raise ValueError("interaction states require component/state or a name/description pair")
 
-
-class LayoutPrinciple(BaseModel):
-    """A concise rule describing an observed layout pattern."""
+class LayoutRule(BaseModel):
+    """One page-level arrangement rule with a concrete value."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
-    description: str | None = Field(default=None, min_length=1)
-    value: JsonValue | None = None
+    description: str = Field(min_length=1)
+    value: JsonValue
     evidence_refs: list[str] = Field(min_length=1)
     inferred: bool = False
-
-    @model_validator(mode="after")
-    def validate_explanation(self) -> "LayoutPrinciple":
-        if self.description is not None or self.value is not None:
-            return self
-        raise ValueError("layout principles require a description or value")
 
 
 class StyleGuideContent(BaseModel):
@@ -65,9 +52,9 @@ class StyleGuideContent(BaseModel):
     typography: dict[str, JsonValue]
     spacing: dict[str, JsonValue]
     surfaces: dict[str, JsonValue]
-    component_families: list[ComponentFamily]
+    component_patterns: list[ComponentPattern]
     interaction_states: list[InteractionState]
-    layout_principles: list[LayoutPrinciple]
+    layout_rules: list[LayoutRule]
 
 
 class Viewport(BaseModel):

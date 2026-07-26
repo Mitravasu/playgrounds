@@ -199,6 +199,21 @@ class RunStore:
         record.analysis.artifacts.extend(stored)
         return self._write_record(record)
 
+    def persist_analysis_sandbox_log(self, run_id: str, content: str) -> RunRecord:
+        """Keep the runner's already-bounded sandbox log for diagnostics."""
+
+        record = self.load_run(run_id)
+        if record.analysis.status not in {AnalysisStatus.PENDING, AnalysisStatus.EVIDENCE_CAPTURED}:
+            raise ValueError("sandbox logs may only be persisted during analysis")
+        stored = self._write_artifacts(
+            self._run_directory(run_id),
+            ANALYSIS_DIRECTORY,
+            {"sandbox.log": content.encode()},
+            {"sandbox.log": "text/plain"},
+        )
+        record.analysis.artifacts.extend(stored)
+        return self._write_record(record)
+
     def create_creation(self, run_id: str, prompt: str) -> CreationRecord:
         """Reserve a creation directory pinned to this run's style guide."""
 

@@ -34,23 +34,6 @@ class Settings(BaseSettings):
         default=Path("runs"),
         validation_alias="PLAYGROUNDS_RUNS_DIRECTORY",
     )
-    trusted_analyzer_hosts: str = Field(
-        default="www.mitravasu.com",
-        validation_alias="PLAYGROUNDS_TRUSTED_ANALYZER_HOSTS",
-    )
-
-    @property
-    def trusted_analyzer_host_set(self) -> frozenset[str]:
-        """Parse a small explicit comma-separated POC hostname allowlist."""
-
-        hosts = frozenset(
-            host.strip().lower().rstrip(".")
-            for host in self.trusted_analyzer_hosts.split(",")
-            if host.strip()
-        )
-        if not hosts:
-            raise ValueError("trusted analyzer hosts must contain at least one hostname")
-        return hosts
 
 
 @lru_cache

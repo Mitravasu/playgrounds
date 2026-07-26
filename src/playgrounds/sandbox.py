@@ -80,13 +80,8 @@ class AnalyzerJobRequest(SandboxJobRequest):
         return self
 
 
-TRUSTED_ANALYZER_HOSTS = frozenset({"www.mitravasu.com"})
-
-
-def validate_trusted_analyzer_url(
-    value: str, trusted_hosts: frozenset[str] = TRUSTED_ANALYZER_HOSTS
-) -> str:
-    """Accept one allowlisted public HTTPS origin for the public-access POC."""
+def validate_public_analyzer_url(value: str) -> str:
+    """Accept a manual public HTTPS URL before proxy-side address validation."""
 
     parsed = urlsplit(value)
     if (
@@ -104,25 +99,16 @@ def validate_trusted_analyzer_url(
         pass
     else:
         raise ValueError("analyzer URLs must not use literal IP addresses")
-    if hostname not in trusted_hosts:
-        raise ValueError("analyzer URL host is not in the trusted POC allowlist")
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        raise ValueError("analyzer URLs must not target localhost")
     return value
 
 
 class PublicAnalyzerJobRequest(SandboxJobRequest):
-    """Controlled public analyzer request, limited to a trusted HTTPS origin."""
+    """Controlled public analyzer request for a manual HTTPS URL."""
 
     kind: Literal[SandboxJobKind.ANALYZER] = SandboxJobKind.ANALYZER
     url: str = Field(min_length=1)
-    trusted_hosts: frozenset[str] = Field(default=TRUSTED_ANALYZER_HOSTS, exclude=True)
-
-    @field_validator("trusted_hosts")
-    @classmethod
-    def normalize_trusted_hosts(cls, value: frozenset[str]) -> frozenset[str]:
-        hosts = frozenset(host.lower().rstrip(".") for host in value if host.strip())
-        if not hosts:
-            raise ValueError("public analyzer jobs require at least one trusted host")
-        return hosts
 
     @model_validator(mode="after")
     def validate_public_analyzer_contract(self) -> "PublicAnalyzerJobRequest":
@@ -136,7 +122,7 @@ class PublicAnalyzerJobRequest(SandboxJobRequest):
         actual_outputs = {artifact.path: artifact.media_type for artifact in self.outputs}
         if self.inputs:
             raise ValueError("public analyzer jobs do not accept workspace inputs")
-        validate_trusted_analyzer_url(self.url, self.trusted_hosts)
+        validate_public_analyzer_url(self.url)
         if len(self.outputs) != len(expected_outputs) or actual_outputs != expected_outputs:
             raise ValueError("analyzer jobs require the declared evidence artifacts")
         return self
@@ -151,6 +137,7 @@ class SandboxRuntimeProfile(BaseModel):
     network_mode: str
     timeout_seconds: int = Field(gt=0)
     memory_limit: str
+    temporary_storage_limit: str
     cpu_count: int = Field(gt=0)
     pid_limit: int = Field(gt=0)
 
@@ -161,6 +148,7 @@ SANDBOX_RUNTIME_PROFILES: dict[SandboxJobKind, SandboxRuntimeProfile] = {
         network_mode="none",
         timeout_seconds=30,
         memory_limit="1g",
+        temporary_storage_limit="64m",
         cpu_count=1,
         pid_limit=64,
     ),
@@ -169,6 +157,7 @@ SANDBOX_RUNTIME_PROFILES: dict[SandboxJobKind, SandboxRuntimeProfile] = {
         network_mode="none",
         timeout_seconds=30,
         memory_limit="1g",
+        temporary_storage_limit="64m",
         cpu_count=1,
         pid_limit=64,
     ),
@@ -178,7 +167,8 @@ PUBLIC_ANALYZER_RUNTIME_PROFILE = SandboxRuntimeProfile(
     entrypoint=("python", "-m", "playgrounds_sandbox.analyzer"),
     network_mode="playgrounds-analyzer-egress",
     timeout_seconds=90,
-    memory_limit="1g",
+    memory_limit="2g",
+    temporary_storage_limit="512m",
     cpu_count=1,
     pid_limit=64,
 )
@@ -266,7 +256,10 @@ class SandboxRunner:
                 environment=self._job_environment(request, profile),
                 read_only=True,
                 tmpfs={
-                    "/tmp": "rw,noexec,nosuid,size=64m,uid=10001,gid=10001",
+                    "/tmp": (
+                        "rw,noexec,nosuid,"
+                        f"size={profile.temporary_storage_limit},uid=10001,gid=10001"
+                    ),
                     "/work/output": "rw,noexec,nosuid,size=100m,uid=10001,gid=10001",
                 },
                 volumes={

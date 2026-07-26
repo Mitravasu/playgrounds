@@ -68,22 +68,21 @@ class AnalyzerWorkflow:
     store: RunStore
     sandbox_runner: AnalyzerSandboxRunner
     synthesizer: StyleGuideSynthesizer
-    trusted_hosts: frozenset[str] = frozenset({"www.mitravasu.com"})
     reporter: Callable[[str], None] = _discard_progress
 
     def analyze(self, url: str) -> RunRecord:
         """Execute the POC graph and leave all successful evidence inspectable."""
 
-        self.reporter("Validating trusted URL...")
+        self.reporter("Validating public URL...")
         # Node 1: typed request creation is the trusted URL validation boundary.
-        request = PublicAnalyzerJobRequest(
-            url=url, outputs=ANALYSIS_OUTPUTS, trusted_hosts=self.trusted_hosts
-        )
+        request = PublicAnalyzerJobRequest(url=url, outputs=ANALYSIS_OUTPUTS)
         run = self.store.create_run(request.url)
         try:
             # Node 2: the sandbox owns Playwright and returns declared artifacts only.
             self.reporter("Starting analyzer sandbox...")
             result = self.sandbox_runner.run(request, {})
+            if result.logs:
+                self.store.persist_analysis_sandbox_log(run.run_id, result.logs)
             if not result.succeeded:
                 raise AnalyzerWorkflowError(
                     run.run_id, result.error or "analyzer sandbox job failed"
@@ -160,13 +159,21 @@ class OllamaStyleGuideSynthesizer:
         prompt = (
             "Synthesize one evidence-backed POC style guide for the analyzed page.\n"
             "Use only the supplied evidence. Mark a fact inferred=true when it is not directly "
-            "observed. Every fact and component family needs observation IDs in evidence_refs.\n"
+            "observed. Every entry needs observation IDs in evidence_refs.\n"
             "Return exactly one JSON object matching the supplied schema. Do not use Markdown "
             "code fences. The root keys must be colors, typography, spacing, surfaces, "
-            "component_families, interaction_states, and layout_principles. The host adds the "
-            "source URL and capture metadata. Preserve semantic links as links. When an evidence "
-            "item has visual_role=button_like_link, describe it as a button-like link or action "
-            "link, never as a native button.\n\n"
+            "component_patterns, interaction_states, and layout_rules.\n"
+            "Use component_patterns only for reusable UI structures. Each entry has name, "
+            "description, evidence_refs, and optional variants, styles, and inferred.\n"
+            "Use interaction_states only for a state of one component pattern. Each entry has "
+            "component_pattern, state, description, evidence_refs, and optional styles and "
+            "inferred.\n"
+            "Use layout_rules only for page-level arrangement rules. Each entry has name, "
+            "description, value, evidence_refs, and optional inferred.\n"
+            "Do not place a field from one section's entry shape into another section. The host "
+            "adds the source URL and capture metadata. Preserve semantic links as links. When an "
+            "evidence item has visual_role=button_like_link, describe it as a button-like link "
+            "or action link, never as a native button.\n\n"
             f"Source URL: {source_url}\n"
             f"Page metadata: {json.dumps(page, sort_keys=True)}\n"
             f"Compact evidence summary: {json.dumps(observations, sort_keys=True)}"

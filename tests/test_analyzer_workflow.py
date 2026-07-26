@@ -16,10 +16,11 @@ from playgrounds.runs import AnalysisStatus, RunStore
 from playgrounds.sandbox import SandboxJobResult
 from playgrounds.style_guide import (
     CaptureMetadata,
-    ComponentFamily,
+    ComponentPattern,
     InteractionState,
-    LayoutPrinciple,
+    LayoutRule,
     StyleGuide,
+    StyleGuideContent,
     Viewport,
 )
 from playgrounds.synthesis_evidence import summarize_observations
@@ -33,8 +34,8 @@ def guide(url: str) -> StyleGuide:
         typography={"font_family": "monospace"},
         spacing={"page_padding": "24px"},
         surfaces={"page": "rgb(0, 0, 0)"},
-        component_families=[
-            ComponentFamily(
+        component_patterns=[
+            ComponentPattern(
                 name="navigation",
                 description="Primary navigation links.",
                 evidence_refs=["element-0"],
@@ -42,15 +43,17 @@ def guide(url: str) -> StyleGuide:
         ],
         interaction_states=[
             InteractionState(
-                component="link",
+                component_pattern="navigation",
                 state="default",
+                description="Navigation links use their default presentation.",
                 evidence_refs=["element-0"],
             )
         ],
-        layout_principles=[
-            LayoutPrinciple(
+        layout_rules=[
+            LayoutRule(
                 name="Centered content",
                 description="Main content is constrained to a readable column.",
+                value="readable column",
                 evidence_refs=["element-0"],
             )
         ],
@@ -72,7 +75,7 @@ class FakeSandboxRunner:
                 "observations.json": b'{"observations":[{"id":"element-0"}]}',
                 "screenshot.png": b"png-bytes",
             },
-            logs="",
+            logs="analyzer completed",
         )
 
 
@@ -116,7 +119,7 @@ def test_analyzer_workflow_persists_validated_evidence_and_guide(tmp_path: Path)
     compact_observations = cast(Mapping[str, object], synthesizer.calls[0]["observations"])
     assert compact_observations["observation_count"] == 1
     assert progress == [
-        "Validating trusted URL...",
+        "Validating public URL...",
         "Starting analyzer sandbox...",
         "Persisting analyzer evidence...",
         "Synthesizing style guide...",
@@ -125,6 +128,7 @@ def test_analyzer_workflow_persists_validated_evidence_and_guide(tmp_path: Path)
     persisted = (tmp_path / run.run_id / "analysis" / "style-guide.json").read_text()
     assert '"source_url": "https://www.mitravasu.com/"' in persisted
     assert (tmp_path / run.run_id / "analysis" / "style-guide.raw.txt").is_file()
+    assert (tmp_path / run.run_id / "analysis" / "sandbox.log").is_file()
 
 
 def test_analyzer_workflow_marks_run_failed_when_the_guide_is_for_another_url(
@@ -228,7 +232,7 @@ def test_ollama_synthesizer_accepts_the_model_natural_guide_shape() -> None:
             "typography": {"font_families": [{"name": "monospace"}]},
             "spacing": {"layout": {"container_width": "1200px"}},
             "surfaces": {"page_background": "rgb(0, 0, 0)"},
-            "component_families": [
+            "component_patterns": [
                 {
                     "name": "Navigation",
                     "description": "Top-level site links.",
@@ -238,16 +242,18 @@ def test_ollama_synthesizer_accepts_the_model_natural_guide_shape() -> None:
             ],
             "interaction_states": [
                 {
-                    "component": "Link",
+                    "component_pattern": "Navigation",
                     "state": "default",
+                    "description": "Navigation links use their default presentation.",
                     "styles": {"color": "rgb(255, 226, 189)"},
                     "evidence_refs": ["element-1"],
                 }
             ],
-            "layout_principles": [
+            "layout_rules": [
                 {
                     "name": "Centered content",
                     "description": "Main content uses a constrained column.",
+                    "value": "constrained column",
                     "evidence_refs": ["element-1"],
                 }
             ],
@@ -272,11 +278,11 @@ def test_ollama_synthesizer_accepts_the_model_natural_guide_shape() -> None:
     )
     assert str(result.source_url) == "https://www.mitravasu.com/"
     assert result.capture.title == "Host title"
-    assert result.component_families[0].variants == []
+    assert result.component_patterns[0].variants == []
     assert result.interaction_states[0].inferred is False
 
 
-def test_style_guide_accepts_named_interactions_and_value_layout_principles() -> None:
+def test_style_guide_requires_one_fixed_shape_for_each_section() -> None:
     result = validate_style_guide_response(
         json.dumps(
             {
@@ -284,17 +290,19 @@ def test_style_guide_accepts_named_interactions_and_value_layout_principles() ->
                 "typography": {},
                 "spacing": {},
                 "surfaces": {},
-                "component_families": [],
+                "component_patterns": [],
                 "interaction_states": [
                     {
-                        "name": "links",
+                        "component_pattern": "links",
+                        "state": "default",
                         "description": "Interactive text uses the primary color.",
                         "evidence_refs": ["element-1"],
                     }
                 ],
-                "layout_principles": [
+                "layout_rules": [
                     {
                         "name": "alignment",
+                        "description": "Content aligns to its starting edge.",
                         "value": "start",
                         "evidence_refs": ["element-1"],
                     }
@@ -305,8 +313,39 @@ def test_style_guide_accepts_named_interactions_and_value_layout_principles() ->
         page={"title": "Host title", "viewport": {"width": 1280, "height": 720}},
     )
 
-    assert result.interaction_states[0].name == "links"
-    assert result.layout_principles[0].value == "start"
+    assert result.interaction_states[0].component_pattern == "links"
+    assert result.layout_rules[0].value == "start"
+
+
+def test_style_guide_json_schema_exposes_fixed_section_shapes() -> None:
+    schema = StyleGuideContent.model_json_schema()
+
+    assert schema["required"] == [
+        "colors",
+        "typography",
+        "spacing",
+        "surfaces",
+        "component_patterns",
+        "interaction_states",
+        "layout_rules",
+    ]
+    assert schema["$defs"]["ComponentPattern"]["required"] == [
+        "name",
+        "description",
+        "evidence_refs",
+    ]
+    assert schema["$defs"]["InteractionState"]["required"] == [
+        "component_pattern",
+        "state",
+        "description",
+        "evidence_refs",
+    ]
+    assert schema["$defs"]["LayoutRule"]["required"] == [
+        "name",
+        "description",
+        "value",
+        "evidence_refs",
+    ]
 
 
 def test_evidence_summary_uses_representative_observations_and_common_values() -> None:

@@ -1,16 +1,10 @@
-"""A narrow CONNECT proxy for the analyzer's trusted public-site POC."""
+"""A narrow CONNECT proxy for manually requested public HTTPS pages."""
 
 import asyncio
 import ipaddress
-import os
 import socket
 from contextlib import suppress
 
-TRUSTED_HOSTS = frozenset(
-    host.strip().lower().rstrip(".")
-    for host in os.environ.get("PLAYGROUNDS_TRUSTED_ANALYZER_HOSTS", "www.mitravasu.com").split(",")
-    if host.strip()
-)
 MAX_REQUEST_BYTES = 16 * 1024
 
 
@@ -28,12 +22,10 @@ def _public_address(value: str) -> bool:
     )
 
 
-async def resolve_trusted_host(hostname: str) -> list[str]:
+async def resolve_public_host(hostname: str) -> list[str]:
     """Resolve and reject any hostname with a non-public answer."""
 
     normalized = hostname.lower().rstrip(".")
-    if normalized not in TRUSTED_HOSTS:
-        raise ValueError("destination is not allowlisted")
     try:
         ipaddress.ip_address(normalized)
     except ValueError:
@@ -102,7 +94,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             raise ValueError("proxy request is too large")
         hostname = _connect_target(request)
         print(f"proxy CONNECT received host={hostname}", flush=True)
-        addresses = await resolve_trusted_host(hostname)
+        addresses = await resolve_public_host(hostname)
         print(f"proxy DNS validated host={hostname} addresses={addresses}", flush=True)
         upstream_reader: asyncio.StreamReader | None = None
         upstream_writer: asyncio.StreamWriter | None = None
@@ -142,8 +134,6 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 async def main() -> None:
     """Serve the fixed proxy only on its analyzer-facing internal network."""
 
-    if not TRUSTED_HOSTS:
-        raise RuntimeError("proxy requires at least one trusted analyzer host")
     server = await asyncio.start_server(handle_client, "0.0.0.0", 8080)
     async with server:
         await server.serve_forever()

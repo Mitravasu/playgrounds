@@ -19,7 +19,7 @@ def main() -> None:
 
 @app.command()
 def analyze(url: str) -> None:
-    """Analyze one trusted POC URL and print its persisted run directory."""
+    """Analyze one manual public HTTPS URL and print its persisted run directory."""
 
     settings = get_settings()
     workflow = AnalyzerWorkflow(
@@ -28,7 +28,6 @@ def analyze(url: str) -> None:
         synthesizer=OllamaStyleGuideSynthesizer(
             create_ollama_client(settings), model_name=settings.ollama_model, reporter=typer.echo
         ),
-        trusted_hosts=settings.trusted_analyzer_host_set,
         reporter=typer.echo,
     )
     run = workflow.analyze(url)

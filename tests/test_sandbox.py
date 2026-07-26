@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from playgrounds.sandbox import (
+    PUBLIC_ANALYZER_RUNTIME_PROFILE,
     AnalyzerJobRequest,
     PublicAnalyzerJobRequest,
     SandboxArtifact,
@@ -60,7 +61,6 @@ def test_analyzer_request_rejects_an_undeclared_artifact() -> None:
         "https://127.0.0.1/",
         "https://localhost/",
         "https://www.mitravasu.com:444/",
-        "https://other.example/",
     ),
 )
 def test_public_analyzer_request_rejects_unsafe_or_untrusted_urls(url: str) -> None:
@@ -75,7 +75,7 @@ def test_public_analyzer_request_rejects_unsafe_or_untrusted_urls(url: str) -> N
         )
 
 
-def test_public_analyzer_request_uses_the_internal_proxy_network() -> None:
+def test_public_analyzer_request_accepts_a_public_https_hostname() -> None:
     request = PublicAnalyzerJobRequest(
         url="https://www.mitravasu.com/",
         outputs=(
@@ -86,12 +86,13 @@ def test_public_analyzer_request_uses_the_internal_proxy_network() -> None:
     )
 
     assert request.url == "https://www.mitravasu.com/"
+    assert PUBLIC_ANALYZER_RUNTIME_PROFILE.memory_limit == "2g"
+    assert PUBLIC_ANALYZER_RUNTIME_PROFILE.temporary_storage_limit == "512m"
 
 
-def test_public_analyzer_request_uses_an_explicit_trusted_host_allowlist() -> None:
+def test_public_analyzer_request_accepts_a_second_public_https_hostname() -> None:
     request = PublicAnalyzerJobRequest(
         url="https://example.com/",
-        trusted_hosts=frozenset({"example.com"}),
         outputs=(
             SandboxArtifact(path="screenshot.png", media_type="image/png"),
             SandboxArtifact(path="page.json", media_type="application/json"),
@@ -99,7 +100,7 @@ def test_public_analyzer_request_uses_an_explicit_trusted_host_allowlist() -> No
         ),
     )
 
-    assert request.trusted_hosts == frozenset({"example.com"})
+    assert request.url == "https://example.com/"
 
 
 @pytest.mark.parametrize("path", ("/etc/passwd", "../secret", "output/../../secret", "."))

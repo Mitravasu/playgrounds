@@ -3,8 +3,6 @@ services:
     build:
       context: sandbox
     command: ["python", "-m", "playgrounds_sandbox.proxy"]
-    environment:
-      PLAYGROUNDS_TRUSTED_ANALYZER_HOSTS: ${PLAYGROUNDS_TRUSTED_ANALYZER_HOSTS:-www.mitravasu.com}
     networks:
       analyzer:
         aliases: ["playgrounds-egress-proxy"]

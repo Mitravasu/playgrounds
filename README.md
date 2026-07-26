@@ -26,17 +26,11 @@ Run all checks:
 make check
 ```
 
-Build the local browser image once. Docker reuses its cached image layers for
-each disposable job:
+Build the local browser image and recreate the analyzer proxy, then analyze a
+public HTTPS page:
 
 ```bash
-docker build --tag playgrounds-browser:latest sandbox
-```
-
-With the analyzer proxy running, analyze the trusted POC page:
-
-```bash
-docker compose -f docker-compose.analyzer-egress.yml up --build --detach
+make analyzer-up
 uv run playgrounds analyze https://www.mitravasu.com/
 ```
 
@@ -48,6 +42,8 @@ Individual commands remain available:
 ```bash
 make sync
 make browsers
+make analyzer-up
+make analyzer-down
 make test
 make lint
 make format

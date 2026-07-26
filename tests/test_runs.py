@@ -80,3 +80,15 @@ def test_store_records_an_analysis_failure(tmp_path: Path) -> None:
 
     assert failed.analysis.status is AnalysisStatus.FAILED
     assert failed.analysis.error == "sandbox job exited unsuccessfully"
+
+
+def test_store_persists_a_bounded_sandbox_log_before_evidence(tmp_path: Path) -> None:
+    store = RunStore(tmp_path)
+    run = store.create_run("https://www.mitravasu.com/")
+
+    recorded = store.persist_analysis_sandbox_log(run.run_id, "analyzer navigation failed")
+
+    assert (tmp_path / run.run_id / "analysis" / "sandbox.log").read_text() == (
+        "analyzer navigation failed"
+    )
+    assert recorded.analysis.artifacts[-1].path == "analysis/sandbox.log"
