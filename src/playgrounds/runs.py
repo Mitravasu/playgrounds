@@ -21,6 +21,15 @@ ANALYSIS_EVIDENCE = {
     "observations.json": "application/json",
     "screenshot.png": "image/png",
 }
+CREATION_MEDIA_TYPES = {
+    "component.html": "text/html",
+    "component.css": "text/css",
+    "component.js": "text/javascript",
+    "metadata.json": "application/json",
+    "screenshot.png": "image/png",
+    "render.json": "application/json",
+    "evaluation.json": "application/json",
+}
 
 
 class AnalysisStatus(StrEnum):
@@ -233,6 +242,77 @@ class RunStore:
         self._write_record(record)
         return creation
 
+    def load_analysis_artifact(self, run_id: str, name: str) -> bytes:
+        """Read one fixed analysis input after verifying it belongs to a complete run."""
+
+        if name not in {"style-guide.json", "screenshot.png"}:
+            raise ValueError(f"unsupported creator analysis input: {name}")
+        record = self.load_run(run_id)
+        if record.analysis.status is not AnalysisStatus.COMPLETE:
+            raise ValueError("component creation requires a completed style guide")
+        return (self._run_directory(run_id) / ANALYSIS_DIRECTORY / name).read_bytes()
+
+    def persist_creation_attempt(
+        self,
+        run_id: str,
+        creation_id: str,
+        *,
+        attempt: int,
+        artifacts: dict[str, bytes],
+        media_types: dict[str, str],
+    ) -> RunRecord:
+        """Keep one complete creator/reviewer attempt for inspection."""
+
+        if attempt not in {1, 2}:
+            raise ValueError("POC creation attempts must be 1 or 2")
+        record, creation = self._creation(run_id, creation_id)
+        if creation.status is not CreationStatus.PENDING:
+            raise ValueError("creation attempts require a pending creation")
+        stored = self._write_artifacts(
+            self._run_directory(run_id),
+            f"{CREATIONS_DIRECTORY}/{creation_id}/attempt-{attempt}",
+            artifacts,
+            media_types,
+        )
+        creation.artifacts.extend(stored)
+        return self._write_record(record)
+
+    def complete_creation(
+        self,
+        run_id: str,
+        creation_id: str,
+        *,
+        artifacts: dict[str, bytes],
+        model_name: str,
+        prompt_version: str,
+    ) -> RunRecord:
+        """Persist the selected attempt as the run's final component."""
+
+        if set(artifacts) != set(CREATION_MEDIA_TYPES):
+            raise ValueError("final creation artifacts do not match the POC contract")
+        record, creation = self._creation(run_id, creation_id)
+        if creation.status is not CreationStatus.PENDING:
+            raise ValueError("only a pending creation may be completed")
+        stored = self._write_artifacts(
+            self._run_directory(run_id),
+            f"{CREATIONS_DIRECTORY}/{creation_id}",
+            artifacts,
+            CREATION_MEDIA_TYPES,
+        )
+        creation.artifacts.extend(stored)
+        creation.status = CreationStatus.COMPLETE
+        creation.model = ModelRecord(name=model_name, prompt_version=prompt_version)
+        creation.error = None
+        return self._write_record(record)
+
+    def mark_creation_failed(self, run_id: str, creation_id: str, error: str) -> RunRecord:
+        """Record a bounded creator failure while retaining completed attempts."""
+
+        record, creation = self._creation(run_id, creation_id)
+        creation.status = CreationStatus.FAILED
+        creation.error = error
+        return self._write_record(record)
+
     def mark_analysis_failed(self, run_id: str, error: str) -> RunRecord:
         """Record a bounded failure message without writing partial artifacts."""
 
@@ -273,6 +353,13 @@ class RunStore:
             json.dumps(record.model_dump(mode="json"), indent=2, sort_keys=True).encode() + b"\n",
         )
         return record
+
+    def _creation(self, run_id: str, creation_id: str) -> tuple[RunRecord, CreationRecord]:
+        record = self.load_run(run_id)
+        for creation in record.creations:
+            if creation.creation_id == creation_id:
+                return record, creation
+        raise ValueError(f"creation does not exist in run: {creation_id}")
 
     def _run_directory(self, run_id: str) -> Path:
         RunRecord.model_validate(

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from playgrounds.sandbox import (
     PUBLIC_ANALYZER_RUNTIME_PROFILE,
     AnalyzerJobRequest,
+    CreatorJobRequest,
     PublicAnalyzerJobRequest,
     SandboxArtifact,
     SandboxJobKind,
@@ -54,6 +55,22 @@ def test_analyzer_request_rejects_an_undeclared_artifact() -> None:
         )
 
 
+def test_creator_request_accepts_only_component_files_and_render_diagnostics() -> None:
+    request = CreatorJobRequest(
+        inputs=(
+            SandboxArtifact(path="component.html", media_type="text/html"),
+            SandboxArtifact(path="component.css", media_type="text/css"),
+            SandboxArtifact(path="component.js", media_type="text/javascript"),
+        ),
+        outputs=(
+            SandboxArtifact(path="screenshot.png", media_type="image/png"),
+            SandboxArtifact(path="render.json", media_type="application/json"),
+        ),
+    )
+
+    assert request.kind is SandboxJobKind.CREATOR
+
+
 @pytest.mark.parametrize(
     "url",
     (
@@ -88,6 +105,19 @@ def test_public_analyzer_request_accepts_a_public_https_hostname() -> None:
     assert request.url == "https://www.mitravasu.com/"
     assert PUBLIC_ANALYZER_RUNTIME_PROFILE.memory_limit == "2g"
     assert PUBLIC_ANALYZER_RUNTIME_PROFILE.temporary_storage_limit == "512m"
+
+
+def test_public_analyzer_request_canonicalizes_a_hostname_without_a_path() -> None:
+    request = PublicAnalyzerJobRequest(
+        url="https://www.mitravasu.com",
+        outputs=(
+            SandboxArtifact(path="screenshot.png", media_type="image/png"),
+            SandboxArtifact(path="page.json", media_type="application/json"),
+            SandboxArtifact(path="observations.json", media_type="application/json"),
+        ),
+    )
+
+    assert request.url == "https://www.mitravasu.com/"
 
 
 def test_public_analyzer_request_accepts_a_second_public_https_hostname() -> None:

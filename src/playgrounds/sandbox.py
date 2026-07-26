@@ -14,7 +14,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from docker.errors import DockerException
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 from requests.exceptions import RequestException
 
 
@@ -110,6 +110,14 @@ class PublicAnalyzerJobRequest(SandboxJobRequest):
     kind: Literal[SandboxJobKind.ANALYZER] = SandboxJobKind.ANALYZER
     url: str = Field(min_length=1)
 
+    @field_validator("url")
+    @classmethod
+    def normalize_public_url(cls, value: str) -> str:
+        """Validate once and retain one canonical URL across the workflow."""
+
+        validate_public_analyzer_url(value)
+        return str(HttpUrl(value))
+
     @model_validator(mode="after")
     def validate_public_analyzer_contract(self) -> "PublicAnalyzerJobRequest":
         """Keep public analysis artifact and input surfaces fixed."""
@@ -125,6 +133,33 @@ class PublicAnalyzerJobRequest(SandboxJobRequest):
         validate_public_analyzer_url(self.url)
         if len(self.outputs) != len(expected_outputs) or actual_outputs != expected_outputs:
             raise ValueError("analyzer jobs require the declared evidence artifacts")
+        return self
+
+
+class CreatorJobRequest(SandboxJobRequest):
+    """Offline creator request with one self-contained component package."""
+
+    kind: Literal[SandboxJobKind.CREATOR] = SandboxJobKind.CREATOR
+
+    @model_validator(mode="after")
+    def validate_creator_contract(self) -> "CreatorJobRequest":
+        """Keep creator inputs and browser diagnostics fixed."""
+
+        expected_inputs = {
+            "component.html": "text/html",
+            "component.css": "text/css",
+            "component.js": "text/javascript",
+        }
+        expected_outputs = {
+            "screenshot.png": "image/png",
+            "render.json": "application/json",
+        }
+        actual_inputs = {artifact.path: artifact.media_type for artifact in self.inputs}
+        actual_outputs = {artifact.path: artifact.media_type for artifact in self.outputs}
+        if len(self.inputs) != len(expected_inputs) or actual_inputs != expected_inputs:
+            raise ValueError("creator jobs require component HTML, CSS, and JavaScript inputs")
+        if len(self.outputs) != len(expected_outputs) or actual_outputs != expected_outputs:
+            raise ValueError("creator jobs require screenshot and render diagnostics outputs")
         return self
 
 

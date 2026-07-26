@@ -131,6 +131,30 @@ def test_analyzer_workflow_persists_validated_evidence_and_guide(tmp_path: Path)
     assert (tmp_path / run.run_id / "analysis" / "sandbox.log").is_file()
 
 
+def test_analyzer_workflow_uses_one_canonical_url_when_input_omits_slash(
+    tmp_path: Path,
+) -> None:
+    supplied_url = "https://www.mitravasu.com"
+    canonical_url = "https://www.mitravasu.com/"
+    sandbox = FakeSandboxRunner()
+    synthesizer = FakeSynthesizer(guide(supplied_url).model_dump_json())
+    workflow = AnalyzerWorkflow(
+        store=RunStore(tmp_path),
+        sandbox_runner=sandbox,
+        synthesizer=synthesizer,
+    )
+
+    run = workflow.analyze(supplied_url)
+
+    assert run.analysis.status is AnalysisStatus.COMPLETE
+    assert run.source_url == canonical_url
+    assert sandbox.request is not None
+    assert sandbox.request.url == canonical_url
+    assert synthesizer.calls[0]["source_url"] == canonical_url
+    persisted = (tmp_path / run.run_id / "analysis" / "style-guide.json").read_text()
+    assert f'"source_url": "{canonical_url}"' in persisted
+
+
 def test_analyzer_workflow_marks_run_failed_when_the_guide_is_for_another_url(
     tmp_path: Path,
 ) -> None:

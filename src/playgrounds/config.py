@@ -25,6 +25,16 @@ class Settings(BaseSettings):
         min_length=1,
         validation_alias="OLLAMA_MODEL",
     )
+    creator_model: str = Field(
+        default="gemma4:cloud",
+        min_length=1,
+        validation_alias="CREATOR_MODEL",
+    )
+    reviewer_model: str = Field(
+        default="gemma4:cloud",
+        min_length=1,
+        validation_alias="REVIEWER_MODEL",
+    )
     sandbox_image: str = Field(
         default="playgrounds-browser:latest",
         min_length=1,
@@ -33,6 +43,10 @@ class Settings(BaseSettings):
     runs_directory: Path = Field(
         default=Path("runs"),
         validation_alias="PLAYGROUNDS_RUNS_DIRECTORY",
+    )
+    components_directory: Path = Field(
+        default=Path("components"),
+        validation_alias="PLAYGROUNDS_COMPONENTS_DIRECTORY",
     )
 
 
