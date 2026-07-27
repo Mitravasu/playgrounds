@@ -902,15 +902,19 @@ class OllamaStorybookGenerator:
         reporter: Callable[[str], None] = _discard_progress,
         heartbeat_seconds: float = CREATOR_HEARTBEAT_SECONDS,
         use_structured_outputs: bool = False,
+        max_components: int = 4,
     ) -> None:
         if heartbeat_seconds <= 0:
             raise ValueError("creator heartbeat interval must be positive")
+        if not 1 <= max_components <= 6:
+            raise ValueError("creator component limit must be between 1 and 6")
         self._client = client
         self._planning_client = planning_client or client
         self.model_name = model_name
         self._reporter = reporter
         self._heartbeat_seconds = heartbeat_seconds
         self._use_structured_outputs = use_structured_outputs
+        self._max_components = max_components
 
     def _chat_with_progress(
         self,
@@ -1106,8 +1110,9 @@ class OllamaStorybookGenerator:
             "empty. `dependencies` must always be []. Never put `files` inside a component.\n"
             "- Every plan story contains exactly `component`, `name`, `description`, and "
             "`viewport`. Viewport is exactly `desktop` or `mobile`.\n"
-            "- Prefer two or three isolated PascalCase components. Add a fourth only when the "
-            "request explicitly requires another distinct reusable behavior. Never exceed four.\n"
+            f"- Generate at most {self._max_components} isolated PascalCase component(s). Choose "
+            "the fewest that fully satisfy the request; add another only for a distinct reusable "
+            "behavior.\n"
             "- Prefer one story per component. Add a second only for a materially distinct state "
             "required by the request. Never exceed eight stories total.\n"
             "- Exclude decorative wrappers, headers, status indicators, generic buttons, and "
@@ -1142,14 +1147,14 @@ class OllamaStorybookGenerator:
                 responses=(),
             )
         try:
-            planned = _validate_model_json(content, StorybookPlanResponse, "creator plan")
+            planned = self._validate_plan(content)
             return planned.plan, (content,)
         except ValueError as error:
             self._reporter("Creator plan did not match StorybookPlan; repairing once...")
             self._reporter(str(error))
             repaired = self._repair_plan(content, str(error))
             try:
-                planned = _validate_model_json(repaired, StorybookPlanResponse, "creator plan")
+                planned = self._validate_plan(repaired)
             except ValueError as repair_error:
                 raise ModelResponseError(
                     str(repair_error),
@@ -1168,6 +1173,7 @@ class OllamaStorybookGenerator:
             "- plan has title, summary, components, and stories.\n"
             "- every component has name, purpose, dependencies, props, variants, and states; "
             "dependencies is always [] and components never have a files field.\n"
+            f"- plan contains at most {self._max_components} components.\n"
             "- every story has component, name, description, and desktop or mobile viewport.\n\n"
             "CANONICAL SHAPE EXAMPLE — copy its structure, not its names or styling:\n"
             f"{canonical_example}\n\n"
@@ -1188,6 +1194,16 @@ class OllamaStorybookGenerator:
                 responses=(response,),
             )
         return repaired
+
+    def _validate_plan(self, response: str) -> StorybookPlanResponse:
+        planned = _validate_model_json(response, StorybookPlanResponse, "creator plan")
+        component_count = len(planned.plan.components)
+        if component_count > self._max_components:
+            raise ValueError(
+                "creator plan contains "
+                f"{component_count} components; configured maximum is {self._max_components}"
+            )
+        return planned
 
     def _generate_project(
         self,

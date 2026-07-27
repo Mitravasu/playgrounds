@@ -62,6 +62,7 @@ def create(run_folder_name: str, prompt: str) -> None:
             ),
             reporter=typer.echo,
             use_structured_outputs=settings.ollama_structured_outputs,
+            max_components=settings.creator_max_components,
         ),
         reviewer=OllamaStorybookReviewer(
             client,

@@ -885,7 +885,7 @@ def test_ollama_creator_repairs_plan_and_one_isolated_component() -> None:
     assert client.calls[0]["options"]["num_predict"] == 2_048
     assert '"schema_version": 1' in planning_prompt
     assert "Do not generate source files in this phase" in planning_prompt
-    assert "Never exceed four" in planning_prompt
+    assert "Generate at most 4 isolated" in planning_prompt
     assert "Never exceed eight stories total" in planning_prompt
     assert "images" not in client.calls[1]["messages"][-1]
     plan_repair_prompt = client.calls[1]["messages"][-1]["content"]
@@ -933,6 +933,47 @@ def test_ollama_creator_generates_isolated_components_in_parallel() -> None:
     assert len(client.calls) == 4
     assert all(call["think"] is False for call in client.calls)
     assert "Generating 2 isolated component(s) in parallel (up to 2 at once)..." in progress
+
+
+def test_ollama_creator_enforces_configured_component_limit() -> None:
+    oversized_plan = json.dumps(
+        {
+            "schema_version": 1,
+            "plan": two_component_project().plan.model_dump(mode="json"),
+        }
+    )
+    repaired_plan = json.dumps(
+        {
+            "schema_version": 1,
+            "plan": generated().plan.model_dump(mode="json"),
+        }
+    )
+    client = FakeOllamaClient(
+        [
+            oversized_plan,
+            repaired_plan,
+            tokens_response(),
+            component_response(),
+        ]
+    )
+    generator = OllamaStorybookGenerator(
+        client,
+        model_name="test-model",
+        max_components=1,
+    )
+
+    result = generator.generate(
+        prompt="Create account controls.",
+        style_guide={"colors": {"action": "orange"}},
+        source_screenshot=b"png",
+    )
+
+    assert [component.name for component in result.storybook.plan.components] == ["Button"]
+    planning_prompt = client.calls[0]["messages"][-1]["content"]
+    assert "Generate at most 1 isolated" in planning_prompt
+    repair_prompt = client.calls[1]["messages"][-1]["content"]
+    assert "configured maximum is 1" in repair_prompt
+    assert "plan contains at most 1 components" in repair_prompt
 
 
 def test_ollama_creator_omits_one_component_after_two_generation_failures() -> None:

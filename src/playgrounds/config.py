@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, HttpUrl, SecretStr
+from pydantic import Field, HttpUrl, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +34,25 @@ class Settings(BaseSettings):
         default="gemma4:cloud",
         min_length=1,
         validation_alias="REVIEWER_MODEL",
+    )
+    langfuse_public_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_PUBLIC_KEY",
+    )
+    langfuse_secret_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_SECRET_KEY",
+    )
+    langfuse_base_url: HttpUrl = Field(
+        default=HttpUrl("https://cloud.langfuse.com"),
+        validation_alias="LANGFUSE_BASE_URL",
+    )
+    creator_max_components: int = Field(
+        default=4,
+        ge=1,
+        le=6,
+        validation_alias="CREATOR_MAX_COMPONENTS",
+        description="Maximum number of isolated components in a generated Storybook.",
     )
     ollama_structured_outputs: bool = Field(
         default=False,
@@ -68,6 +87,16 @@ class Settings(BaseSettings):
         default=Path("storybooks"),
         validation_alias="PLAYGROUNDS_STORYBOOKS_DIRECTORY",
     )
+
+    @model_validator(mode="after")
+    def validate_langfuse_credentials(self) -> "Settings":
+        """Require Langfuse credentials as a pair when tracing is configured."""
+
+        if (self.langfuse_public_key is None) != (self.langfuse_secret_key is None):
+            raise ValueError(
+                "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be configured together"
+            )
+        return self
 
 
 @lru_cache

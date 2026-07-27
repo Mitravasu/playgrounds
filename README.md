@@ -52,10 +52,11 @@ make creator RUN=run_<id> PROMPT="Create a dropdown with three account actions."
 
 The creator first produces a validated component and story plan from the source
 screenshot and style guide. A second small call generates shared CSS tokens.
-Then, up to four isolated component calls run concurrently. Each receives only
-its own plan and stories, the style guide, and the shared tokens, and returns
-exactly one TSX, CSS, and CSF story file. Components cannot import one another.
-The trusted host assembles and validates the complete project.
+Set `CREATOR_MAX_COMPONENTS` to limit the plan to between one and six components;
+the default is four. Then, up to four isolated component calls run concurrently.
+Each receives only its own plan and stories, the style guide, and the shared
+tokens, and returns exactly one TSX, CSS, and CSF story file. Components cannot
+import one another. The trusted host assembles and validates the complete project.
 
 Models cannot generate package configuration, dependencies, or build commands;
 the image-owned Storybook template supplies that boilerplate. Phase-specific raw
@@ -75,6 +76,13 @@ Ollama Cloud does not support its structured-output `format` field, so
 `OLLAMA_STRUCTURED_OUTPUTS` defaults to `false`. The host still validates every
 JSON response with strict Pydantic models and makes one bounded repair request.
 Set the option to `true` only for a compatible self-hosted Ollama server.
+
+To trace every Ollama chat call in Langfuse, set `LANGFUSE_PUBLIC_KEY` and
+`LANGFUSE_SECRET_KEY`. `LANGFUSE_BASE_URL` defaults to the EU cloud endpoint and
+can point to another Langfuse region or a self-hosted instance. Traces include
+text inputs, outputs, model parameters, latency, errors, and token usage when
+Ollama reports it. Image bodies are represented by byte counts and are not
+uploaded. Tracing stays disabled when the keys are absent.
 
 The offline sandbox type-checks the project, builds a static Storybook, discovers
 its story index, and renders every declared story in Chromium at its desktop or
