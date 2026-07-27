@@ -7,8 +7,9 @@ from playgrounds.analyzer_workflow import AnalyzerWorkflow, OllamaStyleGuideSynt
 from playgrounds.config import get_settings
 from playgrounds.creator_workflow import (
     CreatorWorkflow,
-    OllamaComponentGenerator,
-    OllamaComponentReviewer,
+    CreatorWorkflowError,
+    OllamaStorybookGenerator,
+    OllamaStorybookReviewer,
 )
 from playgrounds.llm import create_ollama_client
 from playgrounds.runs import RunStore
@@ -31,7 +32,10 @@ def analyze(url: str) -> None:
         store=RunStore(settings.runs_directory),
         sandbox_runner=SandboxRunner(docker.from_env(), image=settings.sandbox_image),
         synthesizer=OllamaStyleGuideSynthesizer(
-            create_ollama_client(settings), model_name=settings.ollama_model, reporter=typer.echo
+            create_ollama_client(settings),
+            model_name=settings.ollama_model,
+            reporter=typer.echo,
+            use_structured_outputs=settings.ollama_structured_outputs,
         ),
         reporter=typer.echo,
     )
@@ -41,7 +45,7 @@ def analyze(url: str) -> None:
 
 @app.command()
 def create(run_folder_name: str, prompt: str) -> None:
-    """Generate one component from an analyzed run folder and a prompt."""
+    """Generate a Storybook from an analyzed run folder and a prompt."""
 
     settings = get_settings()
     run_id = run_folder_name.rstrip("/").rsplit("/", 1)[-1]
@@ -49,20 +53,38 @@ def create(run_folder_name: str, prompt: str) -> None:
     workflow = CreatorWorkflow(
         store=RunStore(settings.runs_directory),
         sandbox_runner=SandboxRunner(docker.from_env(), image=settings.sandbox_image),
-        generator=OllamaComponentGenerator(
-            client, model_name=settings.creator_model, reporter=typer.echo
+        generator=OllamaStorybookGenerator(
+            client,
+            model_name=settings.creator_model,
+            planning_client=create_ollama_client(
+                settings,
+                timeout_seconds=settings.ollama_planning_timeout_seconds,
+            ),
+            reporter=typer.echo,
+            use_structured_outputs=settings.ollama_structured_outputs,
         ),
-        reviewer=OllamaComponentReviewer(
-            client, model_name=settings.reviewer_model, reporter=typer.echo
+        reviewer=OllamaStorybookReviewer(
+            client,
+            model_name=settings.reviewer_model,
+            reporter=typer.echo,
+            use_structured_outputs=settings.ollama_structured_outputs,
         ),
-        components_directory=settings.components_directory,
+        storybooks_directory=settings.storybooks_directory,
         reporter=typer.echo,
     )
-    result = workflow.create(run_id, prompt)
+    try:
+        result = workflow.create(run_id, prompt)
+    except CreatorWorkflowError as error:
+        creation_directory = (
+            settings.runs_directory / error.run_id / "creations" / error.creation_id
+        )
+        typer.echo(f"creation failed: {error}", err=True)
+        typer.echo(f"inspect persisted diagnostics: {creation_directory}", err=True)
+        raise typer.Exit(code=1) from None
     status = "passed" if result.evaluation.passed else "best valid attempt"
     typer.echo(
         f"creation complete ({status}, score {result.evaluation.aggregate_score:.2f}): "
-        f"{result.component_directory}"
+        f"{result.storybook_directory}"
     )
 
 

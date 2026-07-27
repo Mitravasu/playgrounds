@@ -141,10 +141,12 @@ class OllamaStyleGuideSynthesizer:
         *,
         model_name: str,
         reporter: Callable[[str], None] = _discard_progress,
+        use_structured_outputs: bool = False,
     ) -> None:
         self._client = client
         self.model_name = model_name
         self._reporter = reporter
+        self._use_structured_outputs = use_structured_outputs
 
     def synthesize(
         self,
@@ -182,7 +184,10 @@ class OllamaStyleGuideSynthesizer:
         response = self._client.chat(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt, "images": [screenshot]}],
-            format=StyleGuideContent.model_json_schema(),
+            format=(
+                StyleGuideContent.model_json_schema() if self._use_structured_outputs else None
+            ),
+            think=False,
             options={"temperature": 0},
         )
         self._reporter("Received response from reporter")
@@ -206,7 +211,10 @@ class OllamaStyleGuideSynthesizer:
         repaired = self._client.chat(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
-            format=StyleGuideContent.model_json_schema(),
+            format=(
+                StyleGuideContent.model_json_schema() if self._use_structured_outputs else None
+            ),
+            think=False,
             options={"temperature": 0},
         ).message.content
         if not repaired:

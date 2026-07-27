@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "plan": {
+    "title": "Account controls",
+    "summary": "A compact account action system derived from the analyzed style guide.",
+    "components": [
+      {
+        "name": "Button",
+        "purpose": "Trigger an account action.",
+        "dependencies": [],
+        "props": [
+          "label",
+          "disabled"
+        ],
+        "variants": [
+          "primary"
+        ],
+        "states": [
+          "default",
+          "disabled"
+        ]
+      }
+    ],
+    "stories": [
+      {
+        "component": "Button",
+        "name": "Default",
+        "description": "Enabled primary action.",
+        "viewport": "desktop"
+      },
+      {
+        "component": "Button",
+        "name": "Disabled",
+        "description": "Unavailable action at a narrow viewport.",
+        "viewport": "mobile"
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "src/tokens/tokens.css",
+      "content": ":root {\n  --pg-action: #f97316;\n  --pg-action-hover: #ea580c;\n  --pg-on-action: #ffffff;\n  --pg-focus: #2563eb;\n}\n"
+    },
+    {
+      "path": "src/components/Button/Button.tsx",
+      "content": "import \"../../tokens/tokens.css\";\nimport \"./Button.css\";\n\nexport interface ButtonProps {\n  label: string;\n  disabled?: boolean;\n  onClick?: () => void;\n}\n\nexport function Button({ label, disabled = false, onClick }: ButtonProps) {\n  return (\n    <button className=\"pg-button\" disabled={disabled} onClick={onClick} type=\"button\">\n      {label}\n    </button>\n  );\n}\n"
+    },
+    {
+      "path": "src/components/Button/Button.css",
+      "content": ".pg-button {\n  background: var(--pg-action);\n  border: 0;\n  border-radius: 0.5rem;\n  color: var(--pg-on-action);\n  cursor: pointer;\n  min-height: 2.75rem;\n  padding: 0.75rem 1rem;\n}\n\n.pg-button:hover:not(:disabled) {\n  background: var(--pg-action-hover);\n}\n\n.pg-button:focus-visible {\n  outline: 3px solid var(--pg-focus);\n  outline-offset: 2px;\n}\n\n.pg-button:disabled {\n  cursor: not-allowed;\n  opacity: 0.5;\n}\n"
+    },
+    {
+      "path": "src/components/Button/Button.stories.tsx",
+      "content": "import type { Meta, StoryObj } from \"@storybook/react-vite\";\nimport { fn } from \"storybook/test\";\n\nimport { Button } from \"./Button\";\n\nconst meta = {\n  title: \"Account/Button\",\n  component: Button,\n  args: {\n    label: \"Continue\",\n    onClick: fn(),\n  },\n} satisfies Meta<typeof Button>;\n\nexport default meta;\ntype Story = StoryObj<typeof meta>;\n\nexport const Default: Story = {};\n\nexport const Disabled: Story = {\n  args: {\n    disabled: true,\n  },\n};\n"
+    }
+  ],
+  "inferred_choices": [
+    "Used a blue focus ring because the analyzed style guide did not declare a focus token."
+  ]
+}

@@ -137,29 +137,30 @@ class PublicAnalyzerJobRequest(SandboxJobRequest):
 
 
 class CreatorJobRequest(SandboxJobRequest):
-    """Offline creator request with one self-contained component package."""
+    """Offline creator request with one validated generated Storybook project."""
 
     kind: Literal[SandboxJobKind.CREATOR] = SandboxJobKind.CREATOR
 
     @model_validator(mode="after")
     def validate_creator_contract(self) -> "CreatorJobRequest":
-        """Keep creator inputs and browser diagnostics fixed."""
+        """Keep creator inputs and Storybook outputs fixed."""
 
         expected_inputs = {
-            "component.html": "text/html",
-            "component.css": "text/css",
-            "component.js": "text/javascript",
+            "project.json": "application/json",
         }
         expected_outputs = {
             "screenshot.png": "image/png",
             "render.json": "application/json",
+            "storybook.zip": "application/zip",
         }
         actual_inputs = {artifact.path: artifact.media_type for artifact in self.inputs}
         actual_outputs = {artifact.path: artifact.media_type for artifact in self.outputs}
         if len(self.inputs) != len(expected_inputs) or actual_inputs != expected_inputs:
-            raise ValueError("creator jobs require component HTML, CSS, and JavaScript inputs")
+            raise ValueError("creator jobs require exactly one generated Storybook project")
         if len(self.outputs) != len(expected_outputs) or actual_outputs != expected_outputs:
-            raise ValueError("creator jobs require screenshot and render diagnostics outputs")
+            raise ValueError(
+                "creator jobs require Storybook, screenshot, and render diagnostics outputs"
+            )
         return self
 
 
@@ -181,11 +182,11 @@ SANDBOX_RUNTIME_PROFILES: dict[SandboxJobKind, SandboxRuntimeProfile] = {
     SandboxJobKind.CREATOR: SandboxRuntimeProfile(
         entrypoint=("python", "-m", "playgrounds_sandbox.creator"),
         network_mode="none",
-        timeout_seconds=30,
-        memory_limit="1g",
-        temporary_storage_limit="64m",
-        cpu_count=1,
-        pid_limit=64,
+        timeout_seconds=120,
+        memory_limit="2g",
+        temporary_storage_limit="512m",
+        cpu_count=2,
+        pid_limit=128,
     ),
     SandboxJobKind.ANALYZER: SandboxRuntimeProfile(
         entrypoint=("python", "-m", "playgrounds_sandbox.analyzer"),

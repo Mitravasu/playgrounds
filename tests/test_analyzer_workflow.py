@@ -197,9 +197,13 @@ def test_analyzer_workflow_repairs_once_and_keeps_both_model_responses(tmp_path:
 def test_ollama_synthesizer_reports_a_truncated_single_line_response_preview() -> None:
     url = "https://www.mitravasu.com/"
     content = guide(url).model_dump_json(indent=2) + " " * 200
-    client = SimpleNamespace(
-        chat=lambda **_: SimpleNamespace(message=SimpleNamespace(content=content))
-    )
+    calls: list[dict[str, object]] = []
+
+    def chat(**kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace(message=SimpleNamespace(content=content))
+
+    client = SimpleNamespace(chat=chat)
     progress: list[str] = []
 
     synthesizer = OllamaStyleGuideSynthesizer(
@@ -221,6 +225,8 @@ def test_ollama_synthesizer_reports_a_truncated_single_line_response_preview() -
     assert progress[-1].startswith("Style-guide model response: ")
     assert progress[-1].endswith("...")
     assert len(progress[-1]) == len("Style-guide model response: ") + 153
+    assert calls[0]["think"] is False
+    assert calls[0]["format"] is None
 
 
 def test_ollama_synthesizer_accepts_a_json_code_fence() -> None:

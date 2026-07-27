@@ -11,7 +11,7 @@ help:
 	@echo "analyzer  Analyze URL: make analyzer URL=https://example.com/"
 	@echo "analyzer-up  Build the browser image and recreate the analyzer proxy"
 	@echo "analyzer-down  Stop the analyzer proxy"
-	@echo "creator   Create component: make creator RUN=run_<id> PROMPT=\"Create...\""
+	@echo "creator   Create Storybook: make creator RUN=run_<id> PROMPT=\"Create...\""
 	@echo "test      Run tests"
 	@echo "lint      Run Ruff checks"
 	@echo "format    Format Python files"

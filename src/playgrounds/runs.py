@@ -22,11 +22,10 @@ ANALYSIS_EVIDENCE = {
     "screenshot.png": "image/png",
 }
 CREATION_MEDIA_TYPES = {
-    "component.html": "text/html",
-    "component.css": "text/css",
-    "component.js": "text/javascript",
+    "project.json": "application/json",
     "metadata.json": "application/json",
     "screenshot.png": "image/png",
+    "storybook.zip": "application/zip",
     "render.json": "application/json",
     "evaluation.json": "application/json",
 }
@@ -42,7 +41,7 @@ class AnalysisStatus(StrEnum):
 
 
 class CreationStatus(StrEnum):
-    """The bounded lifecycle of one POC component generation."""
+    """The bounded lifecycle of one generated Storybook."""
 
     PENDING = "pending"
     COMPLETE = "complete"
@@ -89,7 +88,7 @@ class AnalysisRecord(BaseModel):
 
 
 class CreationRecord(BaseModel):
-    """Metadata that pins a generated component to its source style guide."""
+    """Metadata that pins a generated Storybook to its source style guide."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -224,11 +223,11 @@ class RunStore:
         return self._write_record(record)
 
     def create_creation(self, run_id: str, prompt: str) -> CreationRecord:
-        """Reserve a creation directory pinned to this run's style guide."""
+        """Reserve a Storybook creation directory pinned to this run's style guide."""
 
         record = self.load_run(run_id)
         if record.analysis.status is not AnalysisStatus.COMPLETE:
-            raise ValueError("component creation requires a completed style guide")
+            raise ValueError("Storybook creation requires a completed style guide")
         creation = CreationRecord(
             creation_id=f"creation_{uuid4().hex}",
             created_at=_utc_now(),
@@ -249,7 +248,7 @@ class RunStore:
             raise ValueError(f"unsupported creator analysis input: {name}")
         record = self.load_run(run_id)
         if record.analysis.status is not AnalysisStatus.COMPLETE:
-            raise ValueError("component creation requires a completed style guide")
+            raise ValueError("Storybook creation requires a completed style guide")
         return (self._run_directory(run_id) / ANALYSIS_DIRECTORY / name).read_bytes()
 
     def persist_creation_attempt(
@@ -286,7 +285,7 @@ class RunStore:
         model_name: str,
         prompt_version: str,
     ) -> RunRecord:
-        """Persist the selected attempt as the run's final component."""
+        """Persist the selected attempt as the run's final Storybook."""
 
         if set(artifacts) != set(CREATION_MEDIA_TYPES):
             raise ValueError("final creation artifacts do not match the POC contract")

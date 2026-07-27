@@ -35,6 +35,26 @@ class Settings(BaseSettings):
         min_length=1,
         validation_alias="REVIEWER_MODEL",
     )
+    ollama_structured_outputs: bool = Field(
+        default=False,
+        validation_alias="OLLAMA_STRUCTURED_OUTPUTS",
+        description=(
+            "Send JSON schemas through Ollama's format field. Keep false for Ollama Cloud, "
+            "which does not support structured outputs."
+        ),
+    )
+    ollama_timeout_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        validation_alias="OLLAMA_TIMEOUT_SECONDS",
+        description="Maximum time an Ollama HTTP operation may wait before failing.",
+    )
+    ollama_planning_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        validation_alias="OLLAMA_PLANNING_TIMEOUT_SECONDS",
+        description="Short planning-only Ollama HTTP timeout before using the host fallback.",
+    )
     sandbox_image: str = Field(
         default="playgrounds-browser:latest",
         min_length=1,
@@ -44,9 +64,9 @@ class Settings(BaseSettings):
         default=Path("runs"),
         validation_alias="PLAYGROUNDS_RUNS_DIRECTORY",
     )
-    components_directory: Path = Field(
-        default=Path("components"),
-        validation_alias="PLAYGROUNDS_COMPONENTS_DIRECTORY",
+    storybooks_directory: Path = Field(
+        default=Path("storybooks"),
+        validation_alias="PLAYGROUNDS_STORYBOOKS_DIRECTORY",
     )
 
 

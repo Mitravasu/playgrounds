@@ -25,6 +25,9 @@ def test_creator_profile_is_fixed_and_offline() -> None:
 
     assert profile.network_mode == "none"
     assert profile.entrypoint == ("python", "-m", "playgrounds_sandbox.creator")
+    assert profile.timeout_seconds == 120
+    assert profile.memory_limit == "2g"
+    assert profile.temporary_storage_limit == "512m"
 
 
 def test_analyzer_profile_is_fixed_and_offline() -> None:
@@ -55,16 +58,13 @@ def test_analyzer_request_rejects_an_undeclared_artifact() -> None:
         )
 
 
-def test_creator_request_accepts_only_component_files_and_render_diagnostics() -> None:
+def test_creator_request_accepts_only_project_and_storybook_artifacts() -> None:
     request = CreatorJobRequest(
-        inputs=(
-            SandboxArtifact(path="component.html", media_type="text/html"),
-            SandboxArtifact(path="component.css", media_type="text/css"),
-            SandboxArtifact(path="component.js", media_type="text/javascript"),
-        ),
+        inputs=(SandboxArtifact(path="project.json", media_type="application/json"),),
         outputs=(
             SandboxArtifact(path="screenshot.png", media_type="image/png"),
             SandboxArtifact(path="render.json", media_type="application/json"),
+            SandboxArtifact(path="storybook.zip", media_type="application/zip"),
         ),
     )
 
@@ -291,7 +291,7 @@ def test_runner_uses_creator_security_profile_and_cleans_up() -> None:
             "environment": {"PLAYGROUNDS_JOB_ENTRYPOINT": "python -m playgrounds_sandbox.creator"},
             "read_only": True,
             "tmpfs": {
-                "/tmp": "rw,noexec,nosuid,size=64m,uid=10001,gid=10001",
+                "/tmp": "rw,noexec,nosuid,size=512m,uid=10001,gid=10001",
                 "/work/output": "rw,noexec,nosuid,size=100m,uid=10001,gid=10001",
             },
             "volumes": {
@@ -299,9 +299,9 @@ def test_runner_uses_creator_security_profile_and_cleans_up() -> None:
             },
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"],
-            "mem_limit": "1g",
-            "nano_cpus": 1_000_000_000,
-            "pids_limit": 64,
+            "mem_limit": "2g",
+            "nano_cpus": 2_000_000_000,
+            "pids_limit": 128,
         },
     ]
 
