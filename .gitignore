@@ -1,0 +1,11 @@
+.env
+.playwright-browsers/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+.venv/
+__pycache__/
+*.py[cod]
+runs/
+components/
+storybooks/

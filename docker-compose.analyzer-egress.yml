@@ -1,0 +1,26 @@
+services:
+  egress-proxy:
+    build:
+      context: sandbox
+    command: ["python", "-m", "playgrounds_sandbox.proxy"]
+    networks:
+      analyzer:
+        aliases: ["playgrounds-egress-proxy"]
+        ipv4_address: 172.30.0.2
+      public: {}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    user: sandbox
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  analyzer:
+    name: playgrounds-analyzer-egress
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  public:
+    name: playgrounds-proxy-public

@@ -1,0 +1,43 @@
+[project]
+name = "playgrounds"
+version = "0.1.0"
+description = "Analyze website design systems and generate matching React Storybooks."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "docker",
+    "langfuse>=4,<5",
+    "ollama",
+    "playwright",
+    "pydantic",
+    "pydantic-settings",
+    "typer",
+]
+
+[project.scripts]
+playgrounds = "playgrounds.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "ty",
+]
+
+[build-system]
+requires = ["uv-build>=0.10.7,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ty.environment]
+python-version = "3.12"
